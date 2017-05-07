@@ -12,7 +12,7 @@ ENV GOPATH /usr/local/work
 # Add Python stuff
 RUN apt-get install -y python3 python3-dev python3-pip
 RUN apt-get install -y python3-scipy python3-numpy
-RUN python3 -m pip install scikit-learn
+RUN python3 -m pip install scikit-learn pandas imblearn
 
 # Install SVM
 WORKDIR "/tmp"
@@ -31,7 +31,9 @@ RUN apt-get install -y mosquitto-clients mosquitto
 # Install FIND
 WORKDIR "/root"
 RUN go get github.com/schollz/find
-RUN git clone https://github.com/schollz/find.git
+#RUN git clone https://github.com/schollz/find.git
+COPY . /root/find
+VOLUME /root/find/data
 WORKDIR "/root/find"
 RUN go build
 RUN echo "\ninclude_dir /root/find/mosquitto" >> /etc/mosquitto/mosquitto.conf

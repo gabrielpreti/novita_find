@@ -94,3 +94,23 @@ func rfClassify(group string, fingerprint Fingerprint) map[string]float64 {
 	os.Remove(tempFile + ".rftemp")
 	return m
 }
+
+func getClassification(probmap map[string]float64) string {
+	prob := -1.0
+	loc := ""
+	for k, v := range probmap{
+		if v > prob {
+			prob = v
+			loc = k
+		}
+	}
+	return loc
+}
+
+func getProbabilitiesString(probmap map[string]float64) string {
+	result := ""
+	for k, v := range probmap{
+		result = fmt.Sprintf("%s %s=%.3f <br/> ", result, k, v)
+	}
+	return result
+}

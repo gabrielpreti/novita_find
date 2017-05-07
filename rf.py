@@ -9,6 +9,9 @@ import socket
 import threading
 import argparse
 from random import shuffle
+import pandas as pd
+import numpy as np
+from imblearn.pipeline import Pipeline
 
 import socketserver
 from sklearn.ensemble import RandomForestClassifier
@@ -24,6 +27,8 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+from imblearn.under_sampling import RandomUnderSampler
+from sklearn.naive_bayes import GaussianNB
 
 
 DEBUG = False
@@ -31,144 +36,72 @@ DEBUG = False
 random.seed(123)
 
 
-class RF(object):
-    #data = []
-
-    def __init__(self):
-        self.size = 0
-        self.data = []
-        self.nameX = []
-        self.trainX = numpy.array([])
-        self.testX = numpy.array([])
-        self.nameY = []
-        self.trainY = []
-        self.testY = []
-        self.macSet = set()
-        self.locationSet = set()
-
-    def get_data(self, fname, splitRatio):
-        # First go through once and get set of macs/locations
-        X = []
-        with open("data/" + fname + ".rf.json", 'r') as f_in:
-            for fingerprint in f_in:
-                try:
-                    data = json.loads(fingerprint)
-                except:
-                    pass
-                X.append(data)
-                self.locationSet.add(data['location'])
-                for signal in data['wifi-fingerprint']:
-                    self.macSet.add(signal['mac'])
-
-        if DEBUG:
-            print("Loaded %d fingerprints" % len(X))
-
-        # Convert them to lists, for indexing
-        self.nameX = list(self.macSet)
-        self.nameY = list(self.locationSet)
-
-        # Go through the data again, in a random way
-        shuffle(X)
-        # Split the dataset for training / learning
-        trainSize = int(len(X) * splitRatio)
-        if DEBUG:
-            print("Training size is %d fingerprints" % trainSize)
-        # Initialize X, Y matricies for training and testing
-        self.trainX = numpy.zeros((trainSize, len(self.nameX)))
-        self.testX = numpy.zeros((len(X) - trainSize, len(self.nameX)))
-        self.trainY = [0] * trainSize
-        self.testY = [0] * (len(X) - trainSize)
-        curRowTrain = 0
-        curRowTest = 0
-        for i in range(len(X)):
-            newRow = numpy.zeros(len(self.nameX))
-            for signal in X[i]['wifi-fingerprint']:
-                newRow[self.nameX.index(signal['mac'])] = signal['rssi']
-            if i < trainSize:  # do training
-                self.trainX[curRowTrain, :] = newRow
-                self.trainY[curRowTrain] = self.nameY.index(X[i]['location'])
-                curRowTrain = curRowTrain + 1
-            else:
-                self.testX[curRowTest, :] = newRow
-                self.testY[curRowTest] = self.nameY.index(X[i]['location'])
-                curRowTest = curRowTest + 1
+class RF(object):   
 
     def learn(self, dataFile, splitRatio):
-        self.get_data(dataFile, splitRatio)
-        if DEBUG:
-            names = [
-                "Nearest Neighbors",
-                "Linear SVM",
-                "RBF SVM",
-                "Gaussian Process",
-                "Decision Tree",
-                "Random Forest",
-                "Neural Net",
-                "AdaBoost",
-                "Naive Bayes",
-                "QDA"]
-            classifiers = [
-                KNeighborsClassifier(3),
-                SVC(kernel="linear", C=0.025),
-                SVC(gamma=2, C=1),
-                GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
-                DecisionTreeClassifier(max_depth=5),
-                RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1),
-                MLPClassifier(alpha=1),
-                AdaBoostClassifier(),
-                GaussianNB(),
-                QuadraticDiscriminantAnalysis()]
-            for name, clf in zip(names, classifiers):
-                try:
-                    clf.fit(self.trainX, self.trainY)
-                    score = clf.score(self.testX, self.testY)
-                    print(name, score)
-                except:
-                    pass
+        print("Learning ...")
+        json_db = "data/" + dataFile + ".rf.json"
+        json_data = [json.loads(fing) for fing in open(json_db)]
+        fingerprints = []
+        for data in json_data:
+            map = {}
+            map['location'] = data['location']
+            map['timestamp'] = data['timestamp']
+            for fingerp in data['wifi-fingerprint']:
+                map[fingerp['mac']] = fingerp['rssi']
+            fingerprints.append(map)
 
-        # for max_feature in ["auto","log2",None,"sqrt"]:
-        # 	for n_estimator in range(1,30,1):
-        # 		for min_samples_split in range(2,10):
-        # 			clf = RandomForestClassifier(n_estimators=n_estimator,
-        # 				max_features=max_feature,
-        # 				max_depth=None,
-        # 				min_samples_split=min_samples_split,
-        # 				random_state=0)
-        # 			clf.fit(self.trainX, self.trainY)
-        # 			print(max_feature,n_estimator,min_samples_split,clf.score(self.testX, self.testY))
+        fingerprints = pd.DataFrame(fingerprints)
+        fingerprints.fillna(-100, inplace=True)
 
-        clf = RandomForestClassifier(
-            n_estimators=10,
-            max_depth=None,
-            min_samples_split=2,
-            random_state=0)
-        clf.fit(self.trainX, self.trainY)
-        score = clf.score(self.testX, self.testY)
+        features = fingerprints.columns.values.tolist()
+        features.remove('location')
+        features.remove('timestamp')
+        # features = ['34:57:60:49:dc:dc', '36:57:60:49:dc:dc', 'c8:91:f9:e7:7a:ce']
+        locations = np.unique(fingerprints.location)
+
+        X = fingerprints[features] * -1
+        y = fingerprints.location
+
+        pipe_clf = Pipeline(
+            [('rnds', RandomUnderSampler()),
+            ('clf', RandomForestClassifier(bootstrap=False, class_weight=None, criterion='gini', max_depth=None, max_features='auto', max_leaf_nodes=None, min_impurity_split=1e-07, min_samples_leaf=1, min_samples_split=2, min_weight_fraction_leaf=0.0, n_estimators=47, n_jobs=1, oob_score=False, random_state=None, verbose=0, warm_start=False))
+            # ('clf', KNeighborsClassifier(algorithm='auto', leaf_size=30, metric='cityblock', metric_params=None, n_neighbors=2, p=1, weights='distance'))
+            # ('clf', GaussianNB(priors=None))
+            # ('clf', SVC(C=0.20000000000000001, cache_size=200, class_weight=None, coef0=0, decision_function_shape=None, degree=2, gamma=0.20000000000000001, kernel='rbf', max_iter=-1, probability=False, random_state=None, shrinking=True, tol=0.001, verbose=False))
+            ]
+        )
+        pipe_clf.fit(X, y)
         with open('data/' + dataFile + '.rf.pkl', 'wb') as fid:
-            pickle.dump([clf, self.nameX, self.nameY], fid)
-        return score
+            pickle.dump([pipe_clf, features, locations], fid)
 
     def classify(self, groupName, fingerpintFile):
         with open('data/' + groupName + '.rf.pkl', 'rb') as pickle_file:
-            [clf, self.nameX, self.nameY] = pickle.load(pickle_file)
+            [clf, features, locations] = pickle.load(pickle_file)
 
-        # As before, we need a row that defines the macs
-        newRow = numpy.zeros(len(self.nameX))
         data = {}
         with open(fingerpintFile, 'r') as f_in:
             for line in f_in:
                 data = json.loads(line)
         if len(data) == 0:
             return
+
+        fingerprints = {}
+        for f in features:
+            fingerprints[f] = -100
+        fingerprints_count=0
         for signal in data['wifi-fingerprint']:
             # Only add the mac if it exists in the learning model
-            if signal['mac'] in self.nameX:
-                newRow[self.nameX.index(signal['mac'])] = signal['rssi']
+            if signal['mac'] in features:
+                fingerprints[signal['mac']] = signal['rssi']
+                fingerprints_count += 1
+        print("Features len is %d and fingerprints len is %d" % (len(features), fingerprints_count))
 
-        prediction = clf.predict_proba(newRow.reshape(1, -1))
+        prediction = clf.predict_proba(pd.DataFrame([fingerprints]))
         predictionJson = {}
         for i in range(len(prediction[0])):
-            predictionJson[self.nameY[i]] = prediction[0][i]
+            predictionJson[locations[i]] = prediction[0][i]
+        print("Prediction json is %s | prediction is %s" % (predictionJson, clf.predict(pd.DataFrame([fingerprints]))))
         return predictionJson
 
 

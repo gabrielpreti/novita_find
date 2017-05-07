@@ -216,9 +216,7 @@ func trackFingerprint(jsonFingerprint Fingerprint) (string, bool, string, map[st
 				dumpFingerprintsSVM(group)
 				calculateSVM(group)
 			}
-			if RuntimeArgs.RandomForests {
-				rfLearn(group)
-			}
+			rfLearn(group)
 			go appendUserCache(group, jsonFingerprint.Username)
 		}
 	}
@@ -269,17 +267,20 @@ func trackFingerprint(jsonFingerprint Fingerprint) (string, bool, string, map[st
 		go sendMQTTLocation(string(mqttMessage), jsonFingerprint.Group, jsonFingerprint.Username)
 	}
 
+	rfResult := rfClassify(strings.ToLower(jsonFingerprint.Group), jsonFingerprint)
+	locationGuess1 = getClassification(rfResult)
 	// Send out the final responses
 	var userJSON UserPositionJSON
 	userJSON.Location = locationGuess1
 	userJSON.Bayes = bayes
 	userJSON.Svm = svmData
 	userJSON.Time = time.Now().String()
-	if RuntimeArgs.RandomForests {
-		userJSON.Rf = rfClassify(strings.ToLower(jsonFingerprint.Group), jsonFingerprint)
-	}
+	userJSON.Rf = rfResult
 	go setUserPositionCache(strings.ToLower(jsonFingerprint.Group)+strings.ToLower(jsonFingerprint.Username), userJSON)
 
+	
+	message = locationGuess1
+	message = message + "</br>" + getProbabilitiesString(rfResult)
 	return message, true, locationGuess1, bayes, svmData, userJSON.Rf
 
 }
